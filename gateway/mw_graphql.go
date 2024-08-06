@@ -14,6 +14,7 @@ import (
 	gqlwebsocket "github.com/TykTechnologies/graphql-go-tools/pkg/subscription/websocket"
 
 	"github.com/TykTechnologies/tyk/internal/graphengine"
+	"github.com/TykTechnologies/tyk/internal/httputil"
 
 	"github.com/TykTechnologies/tyk/apidef"
 	"github.com/TykTechnologies/tyk/ctx"
@@ -183,7 +184,7 @@ func (m *GraphQLMiddleware) ProcessRequest(w http.ResponseWriter, r *http.Reques
 		return ProxyingRequestFailedErr, http.StatusInternalServerError
 	}
 
-	if websocket.IsWebSocketUpgrade(r) {
+	if upgradeType, upgrade := httputil.IsUpgrade(r); upgrade {
 		if !m.websocketUpgradeAllowed() {
 			return errors.New("websockets are not allowed"), http.StatusUnprocessableEntity
 		}
