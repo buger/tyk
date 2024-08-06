@@ -1721,9 +1721,9 @@ func TestTracing(t *testing.T) {
 	_, _ = ts.Run(t, []test.TestCase{
 		{Method: "GET", Path: "/tyk/debug", AdminAuth: true, Code: 405},
 		{Method: "POST", Path: "/tyk/debug", AdminAuth: true, Code: 400, BodyMatch: "Request malformed"},
-		{Method: "POST", Path: "/tyk/debug", Data: `{}`, AdminAuth: true, Code: 400, BodyMatch: "Spec field is missing"},
-		{Method: "POST", Path: "/tyk/debug", Data: `{"Spec": {}}`, AdminAuth: true, Code: 400, BodyMatch: "Request field is missing"},
-		{Method: "POST", Path: "/tyk/debug", Data: `{"Spec": {}, "Request": {}}`, AdminAuth: true, Code: 400, BodyMatch: "Spec not valid, skipped!"},
+		{Method: "POST", Path: "/tyk/debug", AdminAuth: true, Code: 400, BodyMatch: "Spec field is missing"},
+		{Method: "POST", Path: "/tyk/debug", AdminAuth: true, Code: 400, BodyMatch: "Request field is missing"},
+		{Method: "POST", Path: "/tyk/debug", AdminAuth: true, Code: 400, BodyMatch: "Spec not valid, skipped!"},
 		{Method: "POST", Path: "/tyk/debug", Data: traceRequest{Spec: spec.APIDefinition, Request: &traceHttpRequest{Method: "GET", Path: "/"}}, AdminAuth: true, Code: 200, BodyMatch: `401 Unauthorized`},
 		{Method: "POST", Path: "/tyk/debug", Data: traceRequest{Spec: apiDefWithBundle, Request: &traceHttpRequest{Method: "GET", Path: "/", Headers: authHeaders}}, AdminAuth: true, Code: http.StatusBadRequest, BodyMatch: `Couldn't load bundle`},
 		{Method: "POST", Path: "/tyk/debug", Data: traceRequest{Spec: spec.APIDefinition, Request: &traceHttpRequest{Path: "/", Headers: authHeaders}}, AdminAuth: true, Code: 200, BodyMatch: `200 OK`},
@@ -1926,4 +1926,58 @@ func TestOverrideErrors(t *testing.T) {
 		assert(message4, code2, e, i)
 	})
 
+}
+
+func TestWebsockets(t *testing.T) {
+	ts := StartTest(nil)
+	defer ts.Close()
+
+	globalConf := ts.Gw.GetConfig()
+	globalConf.HttpServerOptions.EnableWebSockets = true
+	ts.Gw.SetConfig(globalConf)
+
+	ts.Gw.BuildAndLoadAPI(func(spec *APISpec) {
+		spec.Proxy.ListenPath = "/"
+	})
+
+	baseURL := strings.Replace(ts.URL, "http://", "ws://", -1)
+	url, err := url.Parse(baseURL)
+	if err != nil {
+		t.Fatalf("cannot parse url: %v", err)
+	}
+
+	conn, err := net.Dial("tcp", url.Host)
+	if err != nil {
+		t.Fatalf("cannot make connection: %v", err)
+	}
+	defer conn.Close()
+
+	req := fmt.Sprintf(`GET %s/ws HTTP/1.1
+Host: %s
+Accept-Encoding: gzip, deflate, br, zstd
+Sec-WebSocket-Version: 13
+Sec-WebSocket-Extensions: permessage-deflate
+Sec-WebSocket-Key: X62lCXELOHFcBBG72P2S2Q==
+Connection: Upgrade, keep-alive
+Upgrade: websocket
+
+`, baseURL, url.Host)
+	req = strings.Replace(req, "\n", "\r\n", -1)
+	_, err = conn.Write([]byte(req))
+	if err != nil {
+		t.Fatalf("cannot write request: %v", err)
+	}
+	buf, err := bufio.NewReader(conn).ReadString('\n')
+	if err != nil {
+		t.Fatalf("cannot read response: %v", err)
+	}
+	if !strings.Contains(buf, "HTTP/1.1 101 Switching Protocols") {
+		t.Error("Unexpected response:", buf)
+	}
+
+	_, _ = ts.Run(t, test.TestCase{
+		Method: "GET",
+		Path:   "/abc",
+		Code:   http.StatusOK,
+	})
 }
